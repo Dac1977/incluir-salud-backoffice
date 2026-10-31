@@ -623,6 +623,12 @@ const endOfDayIso = (date: Date) => {
   return clone.toISOString();
 };
 
+// Argentina no observa horario de verano: offset fijo de -3hs.
+const toArgentinaDateKey = (iso: string) => {
+  const d = new Date(new Date(iso).getTime() - 3 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
+};
+
 const normalizeStringArray = (values: string[] = []) =>
   Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
@@ -715,6 +721,31 @@ export async function listPrestaciones(params: ListPrestacionesParams = {}) {
   const pacienteIds = Array.from(new Set(prestaciones.map((p) => p.paciente_id).filter(Boolean)));
   const prestadorIds = Array.from(new Set(prestaciones.map((p) => p.user_id).filter(Boolean)));
   const completadoPorIds = Array.from(new Set(prestaciones.map((p) => p.completado_por).filter(Boolean)));
+  const centroIds = Array.from(new Set(prestaciones.map((p) => p.centro_id).filter(Boolean))) as string[];
+
+  // Jornadas de residencia activas/registradas para las prestaciones de centro visibles,
+  // para poder indicar "jornada en curso" en filas que todavía están pendientes.
+  const jornadaPorClave = new Map<string, { estado: string; entrada_at: string | null }>();
+  if (centroIds.length > 0 && prestadorIds.length > 0) {
+    const fechasKey = Array.from(new Set(prestaciones.filter((p) => p.centro_id).map((p) => toArgentinaDateKey(p.fecha))));
+    if (fechasKey.length > 0) {
+      const { data: jornadas } = await supabase
+        .from("jornadas_residencia")
+        .select("user_id, centro_id, fecha, estado, entrada_at")
+        .in("user_id", prestadorIds)
+        .in("centro_id", centroIds)
+        .in("fecha", fechasKey);
+
+      (jornadas || []).forEach((j: any) => {
+        const clave = `${j.user_id}_${j.centro_id}_${j.fecha}`;
+        const previa = jornadaPorClave.get(clave);
+        // Si hay más de una jornada para la misma clave, priorizar la que está "iniciada".
+        if (!previa || j.estado === "iniciada") {
+          jornadaPorClave.set(clave, { estado: j.estado, entrada_at: j.entrada_at ?? null });
+        }
+      });
+    }
+  }
 
   const { data: pacientes } = await supabase
     .from("pacientes")
@@ -787,6 +818,9 @@ export async function listPrestaciones(params: ListPrestacionesParams = {}) {
     prestador: p.user_id ? prestadoresMap.get(p.user_id) || null : null,
     completador: p.completado_por ? completadoresMap.get(p.completado_por) || null : null,
     centros_asignados: p.paciente_id ? pacienteCentrosMap.get(p.paciente_id) ?? [] : [],
+    jornada: p.centro_id && p.user_id
+      ? jornadaPorClave.get(`${p.user_id}_${p.centro_id}_${toArgentinaDateKey(p.fecha)}`) ?? null
+      : null,
   }));
 
   return {
@@ -809,6 +843,7 @@ export async function listPrestaciones(params: ListPrestacionesParams = {}) {
       paciente: { id: string; nombre: string; apellido: string; documento: string } | null;
       prestador: { id: string; nombre: string; apellido: string; documento?: string } | null;
       completador: { id: string; nombre: string; apellido: string; documento?: string } | null;
+      jornada: { estado: string; entrada_at: string | null } | null;
     }> | null,
     error: null,
     pagination: {
