@@ -123,6 +123,10 @@ export type PrestacionRow = {
     apellido: string;
     documento: string;
   } | null;
+  jornada?: {
+    estado: string;
+    entrada_at: string | null;
+  } | null;
 };
 
 type PrestacionesTableProps = {
@@ -802,8 +806,19 @@ export const PrestacionesTable = ({ data, filters, pagination, allPrestadores = 
         else if (val === "pendiente") cls = "bg-yellow-100 text-yellow-800 border-yellow-200";
         else if (val === "cancelada") cls = "bg-red-100 text-red-800 border-red-200";
         else cls = "bg-muted text-foreground";
+
+        const jornada = row.original.jornada;
+        const jornadaEnCurso = val === "pendiente" && jornada?.estado === "iniciada";
+
         return (
-          <Badge variant="outline" className={`${cls} capitalize`}>{raw}</Badge>
+          <div className="flex flex-col gap-1 items-start">
+            <Badge variant="outline" className={`${cls} capitalize`}>{raw}</Badge>
+            {jornadaEnCurso && (
+              <Badge variant="outline" className="bg-sky-50 text-sky-700 border-sky-200 text-xs">
+                🟢 Jornada en curso{jornada?.entrada_at ? ` desde ${formatTimeLabel(new Date(jornada.entrada_at))}` : ""}
+              </Badge>
+            )}
+          </div>
         );
       },
       meta: {
