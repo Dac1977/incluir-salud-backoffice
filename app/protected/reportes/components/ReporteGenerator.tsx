@@ -271,6 +271,7 @@ export default function ReporteGenerator({
     // Tabla
     const tableData = prestaciones.map((p) => [
       new Date(p.fecha).toLocaleDateString("es-AR"),
+      p.completed_at ? new Date(p.completed_at).toLocaleDateString("es-AR") : "-",
       p.tipo_prestacion.replace(/_/g, " ").toUpperCase(),
       p.paciente ? `${p.paciente.apellido}, ${p.paciente.nombre}` : "N/A",
       p.paciente?.documento || "N/A",
@@ -299,7 +300,7 @@ export default function ReporteGenerator({
     autoTable(doc, {
       startY: 85,
       margin: { left: marginLeft, right: 15 },
-      head: [["Fecha", "Tipo", "Paciente", "DNI Paciente", "Estado", "Inicio", "Fin", "Duración", "Monto"]],
+      head: [["Fecha", "Realizada", "Tipo", "Paciente", "DNI Paciente", "Estado", "Inicio", "Fin", "Duración", "Monto"]],
       body: tableData,
       theme: "grid",
       headStyles: {
@@ -388,11 +389,12 @@ export default function ReporteGenerator({
       ["Período:", `${fechaInicio} - ${fechaFin}`],
       [],
       ["PRESTACIONES COMPLETADAS"],
-      ["Fecha", "Tipo", "Paciente", "DNI Paciente", "Estado", "Hora inicio", "Hora fin", "Duración", "Monto"],
+      ["Fecha", "Realizada", "Tipo", "Paciente", "DNI Paciente", "Estado", "Hora inicio", "Hora fin", "Duración", "Monto"],
     ];
 
     const prestacionesData = prestaciones.map((p) => [
       new Date(p.fecha).toLocaleDateString("es-AR"),
+      p.completed_at ? new Date(p.completed_at).toLocaleDateString("es-AR") : "-",
       p.tipo_prestacion.replace(/_/g, " ").toUpperCase(),
       p.paciente ? `${p.paciente.apellido}, ${p.paciente.nombre}` : "N/A",
       p.paciente?.documento || "N/A",
@@ -790,6 +792,9 @@ export default function ReporteGenerator({
                     Fecha
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">
+                    Realizada
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">
                     Tipo
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">
@@ -817,6 +822,9 @@ export default function ReporteGenerator({
                   <tr key={p.id} className="hover:bg-accent">
                     <td className="px-4 py-3 text-sm">
                       {new Date(p.fecha).toLocaleDateString("es-AR")}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {p.completed_at ? new Date(p.completed_at).toLocaleDateString("es-AR") : "-"}
                     </td>
                     <td className="px-4 py-3 text-sm capitalize">
                       {p.tipo_prestacion.replace(/_/g, " ")}

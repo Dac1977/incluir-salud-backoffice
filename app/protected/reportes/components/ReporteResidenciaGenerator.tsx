@@ -167,6 +167,7 @@ export default function ReporteResidenciaGenerator({
 
     const diasRows = dias.map((d) => [
       formatearFecha(d.fecha),
+      d.entrada_at ? new Date(d.entrada_at).toLocaleDateString("es-AR") : "-",
       d.entrada_at ? formatearHora(d.entrada_at) : "-",
       d.salida_at ? formatearHora(d.salida_at) : "-",
       formatearDuracion(d.minutos),
@@ -175,16 +176,17 @@ export default function ReporteResidenciaGenerator({
     autoTable(doc, {
       startY: doc.lastAutoTable.finalY + 10,
       margin: { left: marginLeft, right: 15 },
-      head: [["Fecha", "Entrada", "Salida", "Duración"]],
+      head: [["Fecha", "Realizada", "Entrada", "Salida", "Duración"]],
       body: diasRows.length > 0 ? diasRows : [["Sin jornadas", ""]],
       theme: "grid",
       headStyles: { fillColor: [59, 130, 246], textColor: 255, fontStyle: "bold" },
       styles: { fontSize: 9, cellPadding: 3 },
       columnStyles: {
-        0: { cellWidth: 22 },
-        1: { cellWidth: 22 },
-        2: { cellWidth: 22 },
-        3: { cellWidth: 22, halign: "right" },
+        0: { cellWidth: 20 },
+        1: { cellWidth: 20 },
+        2: { cellWidth: 20 },
+        3: { cellWidth: 20 },
+        4: { cellWidth: 20, halign: "right" },
       },
     });
 
@@ -224,9 +226,10 @@ export default function ReporteResidenciaGenerator({
       p.documento || "N/A",
     ]);
 
-    const diasHeader = [[], ["HORAS POR DÍA"], ["Fecha", "Entrada", "Salida", "Duración (min)"]];
+    const diasHeader = [[], ["HORAS POR DÍA"], ["Fecha", "Realizada", "Entrada", "Salida", "Duración (min)"]];
     const diasRows = dias.map((d) => [
       formatearFecha(d.fecha),
+      d.entrada_at ? new Date(d.entrada_at).toLocaleDateString("es-AR") : "-",
       d.entrada_at ? formatearHora(d.entrada_at) : "-",
       d.salida_at ? formatearHora(d.salida_at) : "-",
       d.minutos,
@@ -429,6 +432,9 @@ export default function ReporteResidenciaGenerator({
                         Fecha
                       </th>
                       <th className="px-4 py-2 text-left text-xs font-medium uppercase">
+                        Realizada
+                      </th>
+                      <th className="px-4 py-2 text-left text-xs font-medium uppercase">
                         Entrada
                       </th>
                       <th className="px-4 py-2 text-left text-xs font-medium uppercase">
@@ -444,6 +450,9 @@ export default function ReporteResidenciaGenerator({
                       <tr key={d.fecha}>
                         <td className="px-4 py-2 text-sm">
                           {formatearFecha(d.fecha)}
+                        </td>
+                        <td className="px-4 py-2 text-sm">
+                          {d.entrada_at ? new Date(d.entrada_at).toLocaleDateString("es-AR") : "-"}
                         </td>
                         <td className="px-4 py-2 text-sm">
                           {d.entrada_at ? formatearHora(d.entrada_at) : "-"}
