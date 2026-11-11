@@ -12,6 +12,7 @@ import {
   geocodeAddress,
   getServiceRoleClient,
   sleep,
+  withRetry,
 } from "../_lib";
 
 export const maxDuration = 60;
@@ -71,11 +72,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 });
     }
 
-    const { data: jobData, error: jobError } = await supabase
-      .from("import_jobs")
-      .select("*")
-      .eq("id", jobId)
-      .single();
+    // Se usa el cliente con service_role para leer/escribir el job: el rol
+    // "authenticated" tiene statement_timeout=8s en la DB, y el job de un padrón
+    // grande (candidates/existing_map en jsonb, varios MB) puede tardar más que
+    // eso en leerse/actualizarse, cancelando la consulta (error 57014). El
+    // service_role no tiene ese límite.
+    const adminClient = getServiceRoleClient();
+    if (!adminClient) {
+      return NextResponse.json(
+        { error: "Backend sin credenciales de servicio para importar" },
+        { status: 500 },
+      );
+    }
+
+    const { data: jobData, error: jobError } = await withRetry(() =>
+      adminClient.from("import_jobs").select("*").eq("id", jobId).single(),
+    );
 
     if (jobError || !jobData) {
       return NextResponse.json({ error: "Trabajo de importación no encontrado" }, { status: 404 });
@@ -123,10 +135,12 @@ export async function POST(req: Request) {
 
     if (stage === "consultando_existentes") {
       while (consultCursor < docChunks.length && withinBudget()) {
-        const { data, error } = await supabase
-          .from("pacientes")
-          .select("documento, direccion_completa, ciudad, provincia, codigo_postal, ubicacion")
-          .in("documento", docChunks[consultCursor]);
+        const { data, error } = await withRetry(() =>
+          supabase
+            .from("pacientes")
+            .select("documento, direccion_completa, ciudad, provincia, codigo_postal, ubicacion")
+            .in("documento", docChunks[consultCursor]),
+        );
         if (error) throw error;
         (data as ExistingPacienteRow[] | null)?.forEach((row) => {
           if (row.documento) existingMap[row.documento] = row;
@@ -247,14 +261,12 @@ export async function POST(req: Request) {
         return base;
       });
       const upsertChunks = chunkArray(payload, 500);
-      const adminClient = getServiceRoleClient();
-      if (!adminClient) {
-        throw new Error("Backend sin credenciales de servicio para importar");
-      }
       while (upsertCursor < upsertChunks.length && withinBudget()) {
-        const { error: upsertError } = await adminClient
-          .from("pacientes")
-          .upsert(upsertChunks[upsertCursor], { onConflict: "documento" });
+        const { error: upsertError } = await withRetry(() =>
+          adminClient
+            .from("pacientes")
+            .upsert(upsertChunks[upsertCursor], { onConflict: "documento" }),
+        );
         if (upsertError) throw upsertError;
         upsertCursor += 1;
       }
@@ -264,17 +276,15 @@ export async function POST(req: Request) {
     }
 
     if (stage === "procesando_bajas_pacientes" && withinBudget()) {
-      const adminClient = getServiceRoleClient();
-      if (!adminClient) {
-        throw new Error("Backend sin credenciales de servicio para importar");
-      }
       const bajaChunks = chunkArray(bajasDocumentos, 1000);
       while (bajasPacCursor < bajaChunks.length && withinBudget()) {
-        const { data: bajasUpdated, error: bajasError } = await adminClient
-          .from("pacientes")
-          .update({ activo: false })
-          .in("documento", bajaChunks[bajasPacCursor])
-          .select("id, documento");
+        const { data: bajasUpdated, error: bajasError } = await withRetry(() =>
+          adminClient
+            .from("pacientes")
+            .update({ activo: false })
+            .in("documento", bajaChunks[bajasPacCursor])
+            .select("id, documento"),
+        );
         if (bajasError) throw bajasError;
         (bajasUpdated as { id: string | null }[] | null)?.forEach((row) => {
           if (row.id) bajaPacienteIds.push(row.id);
@@ -287,19 +297,17 @@ export async function POST(req: Request) {
     }
 
     if (stage === "procesando_bajas_prestaciones" && withinBudget()) {
-      const adminClient = getServiceRoleClient();
-      if (!adminClient) {
-        throw new Error("Backend sin credenciales de servicio para importar");
-      }
       const idChunks = chunkArray(bajaPacienteIds, 500);
       const motivo = "Cancelada automáticamente por baja del beneficiario";
       while (bajasPrestCursor < idChunks.length && withinBudget()) {
         const chunk = idChunks[bajasPrestCursor];
-        const { data: prestacionesPorCancelar, error: prestFetchError } = await adminClient
-          .from("prestaciones")
-          .select("id, notas, estado")
-          .in("paciente_id", chunk)
-          .neq("estado", "cancelada");
+        const { data: prestacionesPorCancelar, error: prestFetchError } = await withRetry(() =>
+          adminClient
+            .from("prestaciones")
+            .select("id, notas, estado")
+            .in("paciente_id", chunk)
+            .neq("estado", "cancelada"),
+        );
         if (prestFetchError) throw prestFetchError;
 
         if (prestacionesPorCancelar && prestacionesPorCancelar.length > 0) {
@@ -309,9 +317,9 @@ export async function POST(req: Request) {
             cronico: false,
             notas: row.notas ? `${row.notas}\n${motivo}` : motivo,
           }));
-          const { error: prestUpdateError } = await adminClient
-            .from("prestaciones")
-            .upsert(updates, { onConflict: "id" });
+          const { error: prestUpdateError } = await withRetry(() =>
+            adminClient.from("prestaciones").upsert(updates, { onConflict: "id" }),
+          );
           if (prestUpdateError) throw prestUpdateError;
           prestacionesCancelled += updates.length;
         }
@@ -370,10 +378,9 @@ export async function POST(req: Request) {
       updatePayload.summary = summary;
     }
 
-    const { error: updateError } = await supabase
-      .from("import_jobs")
-      .update(updatePayload)
-      .eq("id", jobId);
+    const { error: updateError } = await withRetry(() =>
+      adminClient.from("import_jobs").update(updatePayload).eq("id", jobId),
+    );
     if (updateError) throw updateError;
 
     let processed = 0;
