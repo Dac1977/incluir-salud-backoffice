@@ -457,7 +457,7 @@ export async function clonePrestacionesCronicasPaciente(pacienteId: string) {
       estado: source.estado ?? "pendiente",
       monto: source.monto,
       descripcion: source.descripcion,
-      notas: source.notas,
+      notas: null,
       paciente_id: pacienteId,
       user_id: source.user_id,
       obra_social_id: source.obra_social_id,

@@ -126,6 +126,7 @@ export type PrestacionRow = {
   jornada?: {
     estado: string;
     entrada_at: string | null;
+    salida_at: string | null;
   } | null;
 };
 
@@ -292,10 +293,14 @@ function RowActionsCell({ prestacion, canWrite, isSuper, loading }: {
     return `${dateFormatter.format(d)} ${timeFormatter.format(d)} hs`;
   };
 
+  const usarJornada = !prestacion.started_at && !!prestacion.jornada?.entrada_at;
+  const inicioReal = usarJornada ? prestacion.jornada!.entrada_at : prestacion.started_at;
+  const finReal = usarJornada ? (prestacion.jornada!.salida_at ?? prestacion.completed_at) : prestacion.completed_at;
+
   const duracionMin = (() => {
-    if (!prestacion.started_at || !prestacion.completed_at) return null;
-    const inicio = new Date(prestacion.started_at).getTime();
-    const fin = new Date(prestacion.completed_at).getTime();
+    if (!inicioReal || !finReal) return null;
+    const inicio = new Date(inicioReal).getTime();
+    const fin = new Date(finReal).getTime();
     if (isNaN(inicio) || isNaN(fin) || fin < inicio) return null;
     return Math.floor((fin - inicio) / (1000 * 60));
   })();
@@ -509,12 +514,12 @@ function RowActionsCell({ prestacion, canWrite, isSuper, loading }: {
             ) : (
               <>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Inicio:</span>
-                  <span>{formatDateTime(prestacion.started_at)}</span>
+                  <span className="text-muted-foreground">Inicio{usarJornada ? ' (jornada)' : ''}:</span>
+                  <span>{formatDateTime(inicioReal)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Cierre:</span>
-                  <span>{formatDateTime(prestacion.completed_at)}</span>
+                  <span className="text-muted-foreground">Cierre{usarJornada ? ' (jornada)' : ''}:</span>
+                  <span>{formatDateTime(finReal)}</span>
                 </div>
                 {isSuper && esCompletada && (
                   <div className="flex justify-end">
@@ -525,7 +530,7 @@ function RowActionsCell({ prestacion, canWrite, isSuper, loading }: {
                 )}
               </>
             )}
-            {prestacion.started_at && prestacion.completed_at && (
+            {inicioReal && finReal && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Duración:</span>
                 <span>{duracion ?? 'No registrada'}</span>

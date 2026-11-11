@@ -725,13 +725,13 @@ export async function listPrestaciones(params: ListPrestacionesParams = {}) {
 
   // Jornadas de residencia activas/registradas para las prestaciones de centro visibles,
   // para poder indicar "jornada en curso" en filas que todavía están pendientes.
-  const jornadaPorClave = new Map<string, { estado: string; entrada_at: string | null }>();
+  const jornadaPorClave = new Map<string, { estado: string; entrada_at: string | null; salida_at: string | null }>();
   if (centroIds.length > 0 && prestadorIds.length > 0) {
     const fechasKey = Array.from(new Set(prestaciones.filter((p) => p.centro_id).map((p) => toArgentinaDateKey(p.fecha))));
     if (fechasKey.length > 0) {
       const { data: jornadas } = await supabase
         .from("jornadas_residencia")
-        .select("user_id, centro_id, fecha, estado, entrada_at")
+        .select("user_id, centro_id, fecha, estado, entrada_at, salida_at")
         .in("user_id", prestadorIds)
         .in("centro_id", centroIds)
         .in("fecha", fechasKey);
@@ -741,7 +741,7 @@ export async function listPrestaciones(params: ListPrestacionesParams = {}) {
         const previa = jornadaPorClave.get(clave);
         // Si hay más de una jornada para la misma clave, priorizar la que está "iniciada".
         if (!previa || j.estado === "iniciada") {
-          jornadaPorClave.set(clave, { estado: j.estado, entrada_at: j.entrada_at ?? null });
+          jornadaPorClave.set(clave, { estado: j.estado, entrada_at: j.entrada_at ?? null, salida_at: j.salida_at ?? null });
         }
       });
     }
@@ -843,7 +843,7 @@ export async function listPrestaciones(params: ListPrestacionesParams = {}) {
       paciente: { id: string; nombre: string; apellido: string; documento: string } | null;
       prestador: { id: string; nombre: string; apellido: string; documento?: string } | null;
       completador: { id: string; nombre: string; apellido: string; documento?: string } | null;
-      jornada: { estado: string; entrada_at: string | null } | null;
+      jornada: { estado: string; entrada_at: string | null; salida_at: string | null } | null;
     }> | null,
     error: null,
     pagination: {

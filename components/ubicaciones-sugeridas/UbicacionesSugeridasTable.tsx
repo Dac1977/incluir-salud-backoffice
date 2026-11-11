@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect, useMemo, useCallback } from "react";
+import { useState, useTransition, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   ColumnDef,
@@ -72,14 +72,10 @@ const formatFecha = (fecha: string | null) => {
   if (!fecha) return "—";
   try {
     const date = new Date(fecha);
-    return date.toLocaleString("es-AR", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
+    const pad = (n: number) => String(n).padStart(2, "0");
+    // Formato manual: toLocaleString difiere entre Node (server) y el browser
+    // (espacio vs &nbsp;) y rompe la hidratación
+    return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}, ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
   } catch {
     return fecha;
   }
@@ -160,32 +156,28 @@ export const UbicacionesSugeridasTable = ({
     }
   }, []);
 
-  const getFiltersSnapshot = useCallback(() => ({
-    tipo,
-    estado,
-    fechaDesde,
-    fechaHasta,
-    pacienteIds: pacienteSelected,
-    centroIds: centroSelected,
-    sugeridoPorIds: sugeridoPorSelected,
-  }), [tipo, estado, fechaDesde, fechaHasta, pacienteSelected, centroSelected, sugeridoPorSelected]);
-
-  const pushStateToUrl = useCallback((
-    filtersToPersist: UbicacionesSugeridasFilters,
-    paginationToPersist: PaginationState,
-  ) => {
+  // Sincronizar filtros + paginación a la URL.
+  // Corre en useEffect (post-render): antes router.push se ejecutaba durante el
+  // render vía handlePaginationChange de TanStack, disparando navegaciones en
+  // loop y reseteando el scroll. replace + scroll:false evita ambos problemas.
+  const isFirstUrlSync = useRef(true);
+  useEffect(() => {
+    if (isFirstUrlSync.current) {
+      isFirstUrlSync.current = false;
+      return;
+    }
     const params = new URLSearchParams();
-    if (filtersToPersist.tipo) params.set("tipo", filtersToPersist.tipo);
-    if (filtersToPersist.estado) params.set("estado", filtersToPersist.estado);
-    if (filtersToPersist.fechaDesde) params.set("fechaDesde", filtersToPersist.fechaDesde);
-    if (filtersToPersist.fechaHasta) params.set("fechaHasta", filtersToPersist.fechaHasta);
-    filtersToPersist.pacienteIds.forEach((id) => params.append("pacienteIds", id));
-    filtersToPersist.centroIds.forEach((id) => params.append("centroIds", id));
-    filtersToPersist.sugeridoPorIds.forEach((id) => params.append("sugeridoPorIds", id));
-    params.set("page", String(paginationToPersist.pageIndex + 1));
-    params.set("pageSize", String(paginationToPersist.pageSize));
-    router.push(`?${params.toString()}`);
-  }, [router]);
+    if (tipo) params.set("tipo", tipo);
+    if (estado) params.set("estado", estado);
+    if (fechaDesde) params.set("fechaDesde", fechaDesde);
+    if (fechaHasta) params.set("fechaHasta", fechaHasta);
+    pacienteSelected.forEach((id) => params.append("pacienteIds", id));
+    centroSelected.forEach((id) => params.append("centroIds", id));
+    sugeridoPorSelected.forEach((id) => params.append("sugeridoPorIds", id));
+    params.set("page", String(paginationState.pageIndex + 1));
+    params.set("pageSize", String(paginationState.pageSize));
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [tipo, estado, fechaDesde, fechaHasta, pacienteSelected, centroSelected, sugeridoPorSelected, paginationState, router]);
 
   // Guardar filtros en localStorage y URL
   const updateFilters = useCallback((
@@ -217,25 +209,15 @@ export const UbicacionesSugeridasTable = ({
     const nextPagination = { pageIndex: 0, pageSize: paginationState.pageSize };
     setPaginationState(nextPagination);
     localStorage.setItem("ubicacionesSugeridasPagination", JSON.stringify(nextPagination));
-    pushStateToUrl({
-      tipo: newTipo,
-      estado: newEstado,
-      fechaDesde: newFechaDesde,
-      fechaHasta: newFechaHasta,
-      pacienteIds: newPacienteIds,
-      centroIds: newCentroIds,
-      sugeridoPorIds: newSugeridoPorIds,
-    }, nextPagination);
-  }, [paginationState.pageSize, pushStateToUrl]);
+  }, [paginationState.pageSize]);
 
   const handlePaginationChange = useCallback((updater: Updater<PaginationState>) => {
     setPaginationState((prev) => {
       const nextState = typeof updater === "function" ? updater(prev) : updater;
       localStorage.setItem("ubicacionesSugeridasPagination", JSON.stringify(nextState));
-      pushStateToUrl(getFiltersSnapshot(), nextState);
       return nextState;
     });
-  }, [getFiltersSnapshot, pushStateToUrl]);
+  }, []);
 
 
   const estadoOptionsFiltradas = useMemo(() => {

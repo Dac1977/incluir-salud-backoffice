@@ -328,8 +328,6 @@ export async function geocodeAddress(query: string, token: string) {
   if (!token) {
     return null;
   }
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), GEOCODE_TIMEOUT_MS);
   try {
     const params = new URLSearchParams({
       access_token: token,
@@ -340,7 +338,15 @@ export async function geocodeAddress(query: string, token: string) {
       autocomplete: "false",
     });
     const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params.toString()}`;
-    const response = await fetch(url, { signal: controller.signal });
+    // Reintenta solo la falla de red del fetch (no vuelve a intentar si Mapbox
+    // ya respondió con un error HTTP, eso se maneja abajo sin reintento). Se crea
+    // un AbortController nuevo por intento: si se reusara el mismo, un timeout en
+    // el primer intento dejaría la señal ya abortada para los reintentos siguientes.
+    const response = await withRetry(() => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), GEOCODE_TIMEOUT_MS);
+      return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timeoutId));
+    }, 2, 300);
     if (!response.ok) {
       const errorPayload = await response.text();
       console.error("Mapbox geocoding error", {
@@ -367,13 +373,35 @@ export async function geocodeAddress(query: string, token: string) {
     } else {
       console.error("Error calling Mapbox geocoding", error);
     }
-  } finally {
-    clearTimeout(timeoutId);
   }
   return null;
 }
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Reintenta una operación de red (Supabase, Mapbox, etc.) ante fallas transitorias
+// (cortes de conexión, "fetch failed"). Padrones grandes hacen miles de llamadas
+// secuenciales; sin esto, un solo corte de red tira abajo toda la importación
+// sin posibilidad de reanudarla. Las operaciones que se reintentan (selects,
+// upserts por documento/id, updates idempotentes) son seguras de repetir.
+export async function withRetry<T>(
+  fn: () => PromiseLike<T>,
+  retries = 2,
+  delayMs = 500,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt < retries) {
+        await sleep(delayMs * (attempt + 1));
+      }
+    }
+  }
+  throw lastError;
+}
 
 export const mapRowToBeneficiario = (
   row: Record<string, unknown>,
