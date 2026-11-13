@@ -36,6 +36,7 @@ type ResidenciaReporteData = {
   }>;
   dias: Array<{
     fecha: string;
+    realizada: string | null;
     minutos: number;
     entrada_at: string | null;
     salida_at: string | null;
@@ -167,7 +168,7 @@ export default function ReporteResidenciaGenerator({
 
     const diasRows = dias.map((d) => [
       formatearFecha(d.fecha),
-      d.entrada_at ? new Date(d.entrada_at).toLocaleDateString("es-AR") : "-",
+      d.realizada ? formatearFecha(d.realizada) : "-",
       d.entrada_at ? formatearHora(d.entrada_at) : "-",
       d.salida_at ? formatearHora(d.salida_at) : "-",
       formatearDuracion(d.minutos),
@@ -176,17 +177,14 @@ export default function ReporteResidenciaGenerator({
     autoTable(doc, {
       startY: doc.lastAutoTable.finalY + 10,
       margin: { left: marginLeft, right: 15 },
+      tableWidth: "auto",
       head: [["Fecha", "Realizada", "Entrada", "Salida", "Duración"]],
       body: diasRows.length > 0 ? diasRows : [["Sin jornadas", ""]],
       theme: "grid",
       headStyles: { fillColor: [59, 130, 246], textColor: 255, fontStyle: "bold" },
       styles: { fontSize: 9, cellPadding: 3 },
       columnStyles: {
-        0: { cellWidth: 20 },
-        1: { cellWidth: 20 },
-        2: { cellWidth: 20 },
-        3: { cellWidth: 20 },
-        4: { cellWidth: 20, halign: "right" },
+        4: { halign: "right" },
       },
     });
 
@@ -229,7 +227,7 @@ export default function ReporteResidenciaGenerator({
     const diasHeader = [[], ["HORAS POR DÍA"], ["Fecha", "Realizada", "Entrada", "Salida", "Duración (min)"]];
     const diasRows = dias.map((d) => [
       formatearFecha(d.fecha),
-      d.entrada_at ? new Date(d.entrada_at).toLocaleDateString("es-AR") : "-",
+      d.realizada ? formatearFecha(d.realizada) : "-",
       d.entrada_at ? formatearHora(d.entrada_at) : "-",
       d.salida_at ? formatearHora(d.salida_at) : "-",
       d.minutos,
@@ -452,7 +450,7 @@ export default function ReporteResidenciaGenerator({
                           {formatearFecha(d.fecha)}
                         </td>
                         <td className="px-4 py-2 text-sm">
-                          {d.entrada_at ? new Date(d.entrada_at).toLocaleDateString("es-AR") : "-"}
+                          {d.realizada ? formatearFecha(d.realizada) : "-"}
                         </td>
                         <td className="px-4 py-2 text-sm">
                           {d.entrada_at ? formatearHora(d.entrada_at) : "-"}
