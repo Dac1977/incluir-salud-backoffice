@@ -372,6 +372,7 @@ export async function getCentros(): Promise<CentroResumen[]> {
 
 export type DiaResidencia = {
   fecha: string;
+  realizada: string | null;
   minutos: number;
   entrada_at: string | null;
   salida_at: string | null;
@@ -473,7 +474,7 @@ export async function getReporteResidencia(
 
   const { data: prestaciones, error: prestacionesError } = await supabase
     .from('prestaciones')
-    .select('fecha, paciente_id, pacientes(id, nombre, apellido, documento)')
+    .select('fecha, completed_at, paciente_id, pacientes(id, nombre, apellido, documento)')
     .eq('centro_id', centroId)
     .eq('user_id', prestadorId)
     .eq('estado', 'completada')
@@ -486,12 +487,25 @@ export async function getReporteResidencia(
     return { data: null, error: prestacionesError };
   }
 
+  const fmtDiaAR = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+
   const pacientesMap = new Map<string, PacienteResidencia>();
-  const prestacionesFechas = new Set<string>();
+  const realizadaPorFecha = new Map<string, string>();
   for (const p of (prestaciones || []) as any[]) {
     const pac = p.pacientes;
     const fechaKey = p.fecha ? (p.fecha as string).slice(0, 10) : null;
-    if (fechaKey) prestacionesFechas.add(fechaKey);
+    if (fechaKey && p.completed_at) {
+      const diaCompletada = fmtDiaAR.format(new Date(p.completed_at));
+      const prev = realizadaPorFecha.get(fechaKey);
+      if (!prev || diaCompletada < prev) {
+        realizadaPorFecha.set(fechaKey, diaCompletada);
+      }
+    }
     if (pac && !pacientesMap.has(pac.id)) {
       pacientesMap.set(pac.id, {
         id: pac.id,
@@ -502,13 +516,20 @@ export async function getReporteResidencia(
     }
   }
 
-  const dias: DiaResidencia[] = Array.from(diasDetalleMap.entries())
-    .map(([fecha, detalle]) => ({ fecha, ...detalle }))
-    .concat(
-      Array.from(prestacionesFechas)
-        .filter((fecha) => !diasDetalleMap.has(fecha))
-        .map((fecha) => ({ fecha, minutos: 0, entrada_at: null, salida_at: null }))
-    )
+  // Una fila por cada fecha PROGRAMADA que tiene prestaciones completadas.
+  // Entrada/Salida/Duración salen de la jornada del día en que REALMENTE se completaron
+  // (realizada), no del día programado — así no se duplica la jornada en dos filas.
+  const dias: DiaResidencia[] = Array.from(realizadaPorFecha.entries())
+    .map(([fecha, realizada]) => {
+      const detalle = diasDetalleMap.get(realizada);
+      return {
+        fecha,
+        realizada,
+        minutos: detalle?.minutos ?? 0,
+        entrada_at: detalle?.entrada_at ?? null,
+        salida_at: detalle?.salida_at ?? null,
+      };
+    })
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
 
   const pacientes = Array.from(pacientesMap.values()).sort((a, b) => {
