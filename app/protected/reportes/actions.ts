@@ -434,44 +434,9 @@ export async function getReporteResidencia(
     return { data: null, error: prestadorError };
   }
 
-  const { data: jornadas, error: jornadasError } = await jornadasClient
-    .from('jornadas_residencia')
-    .select('fecha, entrada_at, salida_at')
-    .eq('centro_id', centroId)
-    .eq('user_id', prestadorId)
-    .eq('estado', 'completada')
-    .gte('fecha', fechaInicio)
-    .lte('fecha', fechaFin)
-    .order('fecha', { ascending: true });
-
-  if (jornadasError) {
-    console.error('Error obteniendo jornadas:', jornadasError);
-    return { data: null, error: jornadasError };
-  }
-
-  const diasDetalleMap = new Map<string, { minutos: number; entrada_at: string | null; salida_at: string | null }>();
-  let totalMinutos = 0;
-  for (const j of (jornadas || []) as any[]) {
-    if (j.entrada_at && j.salida_at) {
-      const minutos = Math.floor(
-        (new Date(j.salida_at).getTime() - new Date(j.entrada_at).getTime()) / (1000 * 60)
-      );
-      const fechaKey = j.fecha as string;
-      const prev = diasDetalleMap.get(fechaKey) ?? { minutos: 0, entrada_at: null, salida_at: null };
-      const entradaMs = new Date(j.entrada_at as string).getTime();
-      const salidaMs = new Date(j.salida_at as string).getTime();
-      if (!prev.entrada_at || entradaMs < new Date(prev.entrada_at).getTime()) {
-        prev.entrada_at = j.entrada_at as string;
-      }
-      if (!prev.salida_at || salidaMs > new Date(prev.salida_at).getTime()) {
-        prev.salida_at = j.salida_at as string;
-      }
-      prev.minutos += minutos;
-      diasDetalleMap.set(fechaKey, prev);
-      totalMinutos += minutos;
-    }
-  }
-
+  // El punto de partida son las PRESTACIONES del período (filtradas por su fecha programada,
+  // como siempre). La jornada que las cubrió se busca después, por el día real en que se
+  // completaron (que puede caer fuera del rango del reporte).
   const { data: prestaciones, error: prestacionesError } = await supabase
     .from('prestaciones')
     .select('fecha, completed_at, paciente_id, pacientes(id, nombre, apellido, documento)')
@@ -513,6 +478,62 @@ export async function getReporteResidencia(
         apellido: pac.apellido,
         documento: pac.documento,
       });
+    }
+  }
+
+  // Jornadas: se buscan por los días REALES de completado (realizada), no por el rango del
+  // reporte — una prestación de fin de mes puede haberse completado (y tener su jornada) al
+  // mes siguiente, y esa jornada igual pertenece a este reporte.
+  //
+  // IMPORTANTE: la columna `fecha` de jornadas_residencia NO siempre es el día real en que
+  // se hizo la jornada — en jornadas cargadas manualmente (catch-up de backoffice) `fecha`
+  // queda con la fecha "programada" original, mientras que `entrada_at`/`salida_at` tienen
+  // la fecha/hora real. Por eso el match correcto es por el día real de `entrada_at`
+  // (hora Argentina), no por la columna `fecha`.
+  const diasRealizadosSet = new Set(realizadaPorFecha.values());
+  const diasDetalleMap = new Map<string, { minutos: number; entrada_at: string | null; salida_at: string | null }>();
+  let totalMinutos = 0;
+
+  if (diasRealizadosSet.size > 0) {
+    const { data: jornadas, error: jornadasError } = await jornadasClient
+      .from('jornadas_residencia')
+      .select('fecha, entrada_at, salida_at')
+      .eq('centro_id', centroId)
+      .eq('user_id', prestadorId)
+      .eq('estado', 'completada');
+
+    if (jornadasError) {
+      console.error('Error obteniendo jornadas:', jornadasError);
+      return { data: null, error: jornadasError };
+    }
+
+    for (const j of (jornadas || []) as any[]) {
+      if (j.entrada_at && j.salida_at) {
+        const diaReal = fmtDiaAR.format(new Date(j.entrada_at));
+        if (!diasRealizadosSet.has(diaReal)) continue;
+
+        const minutos = Math.floor(
+          (new Date(j.salida_at).getTime() - new Date(j.entrada_at).getTime()) / (1000 * 60)
+        );
+        const prev = diasDetalleMap.get(diaReal) ?? { minutos: 0, entrada_at: null, salida_at: null };
+        const entradaMs = new Date(j.entrada_at as string).getTime();
+        const salidaMs = new Date(j.salida_at as string).getTime();
+        if (!prev.entrada_at || entradaMs < new Date(prev.entrada_at).getTime()) {
+          prev.entrada_at = j.entrada_at as string;
+        }
+        if (!prev.salida_at || salidaMs > new Date(prev.salida_at).getTime()) {
+          prev.salida_at = j.salida_at as string;
+        }
+        prev.minutos += minutos;
+        diasDetalleMap.set(diaReal, prev);
+      }
+    }
+
+    // El total del reporte es la suma de las jornadas ÚNICAS encontradas (una vez cada una),
+    // no la suma por fila de prestación — así dos fechas programadas distintas que se
+    // completaron dentro de la misma jornada no duplican esas horas en el total.
+    for (const detalle of diasDetalleMap.values()) {
+      totalMinutos += detalle.minutos;
     }
   }
 
